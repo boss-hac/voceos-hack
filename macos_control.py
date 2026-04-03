@@ -209,6 +209,13 @@ def copy_to_clipboard(text: str) -> list:
 
 
 @mcp.tool()
+def press_enter() -> list:
+    """Press the Enter (Return) key."""
+    msg = osascript("tell application \"System Events\" to key code 36")
+    return screenshot_result(msg, delay=0.3)
+
+
+@mcp.tool()
 def get_clipboard() -> list:
     """Get the current content of the system clipboard."""
     result = subprocess.run(["pbpaste"], capture_output=True, text=True)
