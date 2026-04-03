@@ -108,4 +108,4 @@ nakura/
 | ツール名 | 説明 |
 |---|---|
 | `record_idea` | テキストを受け取り今夜の Markdown に timestamp 付きで追記 |
-| `get_morning_brief` | 昨夜のメモを返す（手動アクセス用） |
+| `get_last_night_memo` | 昨夜のメモを返す（手動アクセス用） |
