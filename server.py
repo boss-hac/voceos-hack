@@ -6,6 +6,7 @@ Searches recipes on Cookpad, finds restaurants on Tabelog, and orders delivery o
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 from curl_cffi import requests as curl_requests
@@ -256,6 +257,15 @@ def search_restaurants(query: str, location: str = "") -> str:
             result += f"   {r['url']}\n"
         result += "\n"
     return result
+
+
+@mcp.tool()
+def open_in_browser(url: str) -> str:
+    """Open a URL in Google Chrome.
+    Use this when the user wants to open a link, visit a restaurant page, view a recipe, or place an order.
+    """
+    subprocess.run(["open", "-a", "Google Chrome", url], check=True, timeout=10)
+    return f"Chromeで開きました: {url}"
 
 
 @mcp.tool()
