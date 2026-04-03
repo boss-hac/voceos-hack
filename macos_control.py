@@ -11,7 +11,7 @@ from mcp.types import ImageContent, TextContent
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.1
 
-mcp = FastMCP("macos-control")
+mcp = FastMCP("computer use")
 
 
 VIRTUAL_SIZE = 1000
