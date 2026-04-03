@@ -401,6 +401,44 @@ def press_key(key_code: str, app_name: str = "") -> list:
 
 
 @mcp.tool()
+def shortcut(keys: str, app_name: str = "") -> list:
+    """Execute a keyboard shortcut using a natural format like 'cmd+t' or 'cmd+shift+n'.
+
+    Args:
+        keys: Shortcut string. Use '+' as separator.
+              Modifier aliases: cmd/command, shift, opt/option/alt, ctrl/control.
+              Examples: 'cmd+t', 'cmd+shift+n', 'ctrl+a', 'cmd+opt+esc'
+        app_name: If provided, crops the result screenshot to this app's window.
+    """
+    _mod_map = {
+        "cmd": "command down", "command": "command down",
+        "shift": "shift down",
+        "opt": "option down", "option": "option down", "alt": "option down",
+        "ctrl": "control down", "control": "control down",
+    }
+    parts = [p.strip().lower() for p in keys.split("+")]
+    modifiers = []
+    key = None
+    for p in parts:
+        if p in _mod_map:
+            modifiers.append(_mod_map[p])
+        else:
+            key = p
+
+    if key is None:
+        return screenshot_result(f"No key found in '{keys}'", delay=0)
+
+    if modifiers:
+        mod_str = "{" + ", ".join(modifiers) + "}"
+        script = f'tell application "System Events" to keystroke "{key}" using {mod_str}'
+    else:
+        script = f'tell application "System Events" to keystroke "{key}"'
+
+    msg = osascript(script)
+    return screenshot_result(f"Shortcut: {keys} → {msg}", delay=0.3, app_name=app_name or None)
+
+
+@mcp.tool()
 def press_enter(app_name: str = "") -> list:
     """Press the Enter (Return) key.
 
