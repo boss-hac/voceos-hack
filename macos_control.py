@@ -13,14 +13,7 @@ pyautogui.PAUSE = 0.1
 
 mcp = FastMCP("computer use")
 
-
 VIRTUAL_SIZE = 1000
-
-
-def to_screen(x: int, y: int) -> tuple[int, int]:
-    """Convert virtual 1000x1000 coordinates to actual screen coordinates."""
-    sw, sh = pyautogui.size()
-    return int(x * sw / VIRTUAL_SIZE), int(y * sh / VIRTUAL_SIZE)
 
 
 def osascript(script: str) -> str:
@@ -34,10 +27,54 @@ def osascript(script: str) -> str:
     return result.stdout.strip() or "Done"
 
 
-def screenshot_result(message: str, delay: float = 0.5) -> list:
-    """Return text message + screenshot as MCP content list."""
+def get_window_bounds(app_name: str) -> tuple[int, int, int, int] | None:
+    """Return (x, y, width, height) of the app's frontmost window, or None on failure."""
+    script = f'''
+tell application "System Events"
+    tell process "{app_name}"
+        set pos to position of window 1
+        set sz to size of window 1
+        return (item 1 of pos) & "," & (item 2 of pos) & "," & (item 1 of sz) & "," & (item 2 of sz)
+    end tell
+end tell
+'''
+    raw = osascript(script)
+    if raw.startswith("Error"):
+        return None
+    try:
+        parts = [int(v.strip()) for v in raw.split(",")]
+        return parts[0], parts[1], parts[2], parts[3]
+    except Exception:
+        return None
+
+
+def to_screen(x: int, y: int, bounds: tuple | None = None) -> tuple[int, int]:
+    """Convert virtual 1000x1000 coords to actual screen coords.
+
+    If bounds (wx, wy, ww, wh) are given, maps relative to that window.
+    Otherwise maps to full screen.
+    """
+    if bounds:
+        wx, wy, ww, wh = bounds
+        return int(wx + x * ww / VIRTUAL_SIZE), int(wy + y * wh / VIRTUAL_SIZE)
+    sw, sh = pyautogui.size()
+    return int(x * sw / VIRTUAL_SIZE), int(y * sh / VIRTUAL_SIZE)
+
+
+def screenshot_result(message: str, delay: float = 0.5, app_name: str | None = None) -> list:
+    """Return text message + screenshot as MCP content list.
+
+    If app_name is given, crops the screenshot to the app's window.
+    """
     time.sleep(delay)
     img = pyautogui.screenshot()
+
+    if app_name:
+        bounds = get_window_bounds(app_name)
+        if bounds:
+            wx, wy, ww, wh = bounds
+            img = img.crop((wx, wy, wx + ww, wy + wh))
+
     buf = BytesIO()
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode()
@@ -57,7 +94,7 @@ def open_app(app_name: str) -> list:
     result = subprocess.run(["open", "-a", app_name], capture_output=True, text=True)
     if result.returncode != 0:
         return screenshot_result(f"Error: {result.stderr.strip()}", delay=0)
-    return screenshot_result(f"Opened {app_name}", delay=1.0)
+    return screenshot_result(f"Opened {app_name}", delay=1.0, app_name=app_name)
 
 
 @mcp.tool()
@@ -71,7 +108,7 @@ def quit_app(app_name: str) -> list:
 def switch_to_app(app_name: str) -> list:
     """Bring an application to the foreground."""
     msg = osascript(f'tell application "{app_name}" to activate')
-    return screenshot_result(msg, delay=0.5)
+    return screenshot_result(msg, delay=0.5, app_name=app_name)
 
 
 @mcp.tool()
@@ -99,7 +136,7 @@ tell application "System Events"
 end tell
 '''
     msg = osascript(script)
-    return screenshot_result(msg, delay=0.5)
+    return screenshot_result(msg, delay=0.5, app_name=app_name)
 
 
 @mcp.tool()
@@ -114,7 +151,7 @@ tell application "System Events"
 end tell
 '''
     msg = osascript(script)
-    return screenshot_result(msg, delay=0.5)
+    return screenshot_result(msg, delay=0.5, app_name=app_name)
 
 
 @mcp.tool()
@@ -129,7 +166,7 @@ tell application "System Events"
 end tell
 '''
     msg = osascript(script)
-    return screenshot_result(msg, delay=0.5)
+    return screenshot_result(msg, delay=0.5, app_name=app_name)
 
 
 @mcp.tool()
@@ -138,7 +175,7 @@ def open_finder_folder(path: str) -> list:
     result = subprocess.run(["open", path], capture_output=True, text=True)
     if result.returncode != 0:
         return screenshot_result(f"Error: {result.stderr.strip()}", delay=0)
-    return screenshot_result(f"Opened {path} in Finder", delay=1.0)
+    return screenshot_result(f"Opened {path} in Finder", delay=1.0, app_name="Finder")
 
 
 # ──────────────────────────────────────────
@@ -146,8 +183,13 @@ def open_finder_folder(path: str) -> list:
 # ──────────────────────────────────────────
 
 @mcp.tool()
-def type_text(text: str) -> list:
-    """Type the given text into the currently focused input field."""
+def type_text(text: str, app_name: str = "") -> list:
+    """Type the given text into the currently focused input field.
+
+    Args:
+        text: Text to type.
+        app_name: If provided, crops the result screenshot to this app's window.
+    """
     escaped = text.replace('"', '\\"')
     script = f'''
 tell application "System Events"
@@ -155,17 +197,17 @@ tell application "System Events"
 end tell
 '''
     msg = osascript(script)
-    return screenshot_result(msg, delay=0.3)
+    return screenshot_result(msg, delay=0.3, app_name=app_name or None)
 
 
 @mcp.tool()
-def send_keystroke(key: str, modifiers: str = "") -> list:
+def send_keystroke(key: str, modifiers: str = "", app_name: str = "") -> list:
     """Send a keyboard shortcut.
 
     Args:
         key: The key to press (e.g. 'c', 'v', 'return', 'tab', 'escape').
         modifiers: Comma-separated modifiers: 'command', 'shift', 'option', 'control'.
-                   Example: 'command,shift' to press Cmd+Shift+<key>.
+        app_name: If provided, crops the result screenshot to this app's window.
     """
     if modifiers.strip():
         mod_list = [m.strip() + " down" for m in modifiers.split(",") if m.strip()]
@@ -174,15 +216,19 @@ def send_keystroke(key: str, modifiers: str = "") -> list:
     else:
         script = f'tell application "System Events" to keystroke "{key}"'
     msg = osascript(script)
-    return screenshot_result(msg, delay=0.3)
+    return screenshot_result(msg, delay=0.3, app_name=app_name or None)
 
 
 @mcp.tool()
-def press_key(key_code: str) -> list:
+def press_key(key_code: str, app_name: str = "") -> list:
     """Press a special key by name.
 
     Supported keys: return, tab, space, delete, escape, up, down, left, right,
     home, end, pageup, pagedown, f1-f12.
+
+    Args:
+        key_code: Key name.
+        app_name: If provided, crops the result screenshot to this app's window.
     """
     key_codes = {
         "return": 36, "tab": 48, "space": 49, "delete": 51, "escape": 53,
@@ -196,7 +242,18 @@ def press_key(key_code: str) -> list:
     if code is None:
         return screenshot_result(f"Unknown key: {key_code}", delay=0)
     msg = osascript(f'tell application "System Events" to key code {code}')
-    return screenshot_result(msg, delay=0.3)
+    return screenshot_result(msg, delay=0.3, app_name=app_name or None)
+
+
+@mcp.tool()
+def press_enter(app_name: str = "") -> list:
+    """Press the Enter (Return) key.
+
+    Args:
+        app_name: If provided, crops the result screenshot to this app's window.
+    """
+    msg = osascript('tell application "System Events" to key code 36')
+    return screenshot_result(msg, delay=0.3, app_name=app_name or None)
 
 
 @mcp.tool()
@@ -206,13 +263,6 @@ def copy_to_clipboard(text: str) -> list:
     if result.returncode != 0:
         return screenshot_result(f"Error: {result.stderr.strip()}", delay=0)
     return screenshot_result("Copied to clipboard", delay=0)
-
-
-@mcp.tool()
-def press_enter() -> list:
-    """Press the Enter (Return) key."""
-    msg = osascript("tell application \"System Events\" to key code 36")
-    return screenshot_result(msg, delay=0.3)
 
 
 @mcp.tool()
@@ -228,50 +278,63 @@ def get_clipboard() -> list:
 # ──────────────────────────────────────────
 
 @mcp.tool()
-def get_mouse_position() -> list:
-    """Get the current mouse cursor position as virtual 1000x1000 coordinates."""
+def get_mouse_position(app_name: str = "") -> list:
+    """Get the current mouse cursor position as virtual 1000x1000 coordinates.
+
+    If app_name is provided, coordinates are relative to that app's window.
+    """
     ax, ay = pyautogui.position()
-    sw, sh = pyautogui.size()
-    vx = int(ax * VIRTUAL_SIZE / sw)
-    vy = int(ay * VIRTUAL_SIZE / sh)
-    return screenshot_result(f"virtual=({vx}, {vy})  actual=({ax}, {ay})", delay=0)
+    bounds = get_window_bounds(app_name) if app_name else None
+    if bounds:
+        wx, wy, ww, wh = bounds
+        vx = int((ax - wx) * VIRTUAL_SIZE / ww)
+        vy = int((ay - wy) * VIRTUAL_SIZE / wh)
+    else:
+        sw, sh = pyautogui.size()
+        vx = int(ax * VIRTUAL_SIZE / sw)
+        vy = int(ay * VIRTUAL_SIZE / sh)
+    return screenshot_result(f"virtual=({vx}, {vy})  actual=({ax}, {ay})", delay=0, app_name=app_name or None)
 
 
 @mcp.tool()
-def mouse_move(x: int, y: int, duration: float = 0.3) -> list:
+def mouse_move(x: int, y: int, app_name: str = "", duration: float = 0.3) -> list:
     """Move the mouse cursor to (x, y) in virtual 1000x1000 coordinates.
 
     Args:
         x: Horizontal position (0-1000).
         y: Vertical position (0-1000).
+        app_name: If provided, coordinates are relative to this app's window.
         duration: Time in seconds for the movement (default 0.3).
     """
-    sx, sy = to_screen(x, y)
+    bounds = get_window_bounds(app_name) if app_name else None
+    sx, sy = to_screen(x, y, bounds)
     pyautogui.moveTo(sx, sy, duration=duration)
-    return screenshot_result(f"Moved to virtual=({x}, {y})", delay=0.2)
+    return screenshot_result(f"Moved to virtual=({x}, {y})", delay=0.2, app_name=app_name or None)
 
 
 @mcp.tool()
-def mouse_click(x: int, y: int, button: str = "left") -> list:
+def mouse_click(x: int, y: int, app_name: str = "", button: str = "left") -> list:
     """Click at the given position in virtual 1000x1000 coordinates.
 
     Args:
         x: Horizontal position (0-1000).
         y: Vertical position (0-1000).
+        app_name: If provided, coordinates are relative to this app's window.
         button: 'left', 'right', or 'double' (default 'left').
     """
-    sx, sy = to_screen(x, y)
+    bounds = get_window_bounds(app_name) if app_name else None
+    sx, sy = to_screen(x, y, bounds)
     if button == "double":
         pyautogui.doubleClick(sx, sy)
     elif button == "right":
         pyautogui.rightClick(sx, sy)
     else:
         pyautogui.click(sx, sy)
-    return screenshot_result(f"{button} click at virtual=({x}, {y})", delay=0.3)
+    return screenshot_result(f"{button} click at virtual=({x}, {y})", delay=0.3, app_name=app_name or None)
 
 
 @mcp.tool()
-def mouse_drag(from_x: int, from_y: int, to_x: int, to_y: int, duration: float = 0.5) -> list:
+def mouse_drag(from_x: int, from_y: int, to_x: int, to_y: int, app_name: str = "", duration: float = 0.5) -> list:
     """Drag from one position to another in virtual 1000x1000 coordinates.
 
     Args:
@@ -279,30 +342,34 @@ def mouse_drag(from_x: int, from_y: int, to_x: int, to_y: int, duration: float =
         from_y: Start vertical position (0-1000).
         to_x: End horizontal position (0-1000).
         to_y: End vertical position (0-1000).
+        app_name: If provided, coordinates are relative to this app's window.
         duration: Time in seconds for the drag (default 0.5).
     """
-    sfx, sfy = to_screen(from_x, from_y)
-    stx, sty = to_screen(to_x, to_y)
+    bounds = get_window_bounds(app_name) if app_name else None
+    sfx, sfy = to_screen(from_x, from_y, bounds)
+    stx, sty = to_screen(to_x, to_y, bounds)
     pyautogui.moveTo(sfx, sfy, duration=0.2)
     pyautogui.dragTo(stx, sty, duration=duration, button="left")
-    return screenshot_result(f"Dragged from virtual=({from_x}, {from_y}) to ({to_x}, {to_y})", delay=0.3)
+    return screenshot_result(f"Dragged from virtual=({from_x}, {from_y}) to ({to_x}, {to_y})", delay=0.3, app_name=app_name or None)
 
 
 @mcp.tool()
-def mouse_scroll(amount: int, x: int = None, y: int = None) -> list:
+def mouse_scroll(amount: int, x: int = None, y: int = None, app_name: str = "") -> list:
     """Scroll up or down at the current or specified position.
 
     Args:
         amount: Positive to scroll up, negative to scroll down.
-        x: Optional horizontal position to scroll at.
-        y: Optional vertical position to scroll at.
+        x: Optional horizontal position (0-1000) to scroll at.
+        y: Optional vertical position (0-1000) to scroll at.
+        app_name: If provided, coordinates are relative to this app's window.
     """
     if x is not None and y is not None:
-        sx, sy = to_screen(x, y)
+        bounds = get_window_bounds(app_name) if app_name else None
+        sx, sy = to_screen(x, y, bounds)
         pyautogui.moveTo(sx, sy, duration=0.2)
     pyautogui.scroll(amount)
     direction = "up" if amount > 0 else "down"
-    return screenshot_result(f"Scrolled {direction} by {abs(amount)}", delay=0.3)
+    return screenshot_result(f"Scrolled {direction} by {abs(amount)}", delay=0.3, app_name=app_name or None)
 
 
 @mcp.tool()
