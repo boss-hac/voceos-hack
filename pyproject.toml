@@ -1,0 +1,17 @@
+[project]
+name = "voceos-hack"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "droidrun[anthropic]",
+    "lxml>=6.0.2",
+    "mcp>=1.27.0",
+    "python-dotenv>=1.2.2",
+    "requests>=2.33.1",
+]
+
+[tool.uv.sources]
+droidrun = { path = "../voceos-droidrun" }

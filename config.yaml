@@ -1,0 +1,55 @@
+_version: 5
+
+agent:
+  max_steps: 15
+  reasoning: false
+  streaming: false
+  after_sleep_action: 1.0
+  wait_for_stable_ui: 0.3
+  use_normalized_coordinates: false
+
+  fast_agent:
+    vision: false
+    parallel_tools: true
+
+llm_profiles:
+  fast_agent:
+    provider: Anthropic
+    model: claude-sonnet-4-5-latest
+    temperature: 0.2
+
+  app_opener:
+    provider: Anthropic
+    model: claude-sonnet-4-5-latest
+    temperature: 0.0
+
+  structured_output:
+    provider: Anthropic
+    model: claude-sonnet-4-5-latest
+    temperature: 0.0
+
+device:
+  serial: null
+  use_tcp: false
+  platform: android
+  auto_setup: true
+
+telemetry:
+  enabled: false
+
+tracing:
+  enabled: false
+
+logging:
+  debug: false
+  save_trajectory: none
+  rich_text: false
+
+tools:
+  disabled_tools:
+    - click_at
+    - click_area
+    - long_press_at
+
+mcp:
+  enabled: false
