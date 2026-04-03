@@ -4,8 +4,12 @@ import time
 from io import BytesIO
 
 import pyautogui
+from PIL import ImageDraw, ImageFont
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent
+
+# element ID -> (x, y, w, h) in logical screen coords
+_element_cache: dict[str, tuple[int, int, int, int]] = {}
 
 # 誤操作防止: フェイルセーフ有効（画面端にカーソル移動でストップ）
 pyautogui.FAILSAFE = True
@@ -61,6 +65,108 @@ def to_screen(x: int, y: int, bounds: tuple | None = None) -> tuple[int, int]:
     return int(x * sw / VIRTUAL_SIZE), int(y * sh / VIRTUAL_SIZE)
 
 
+_ROLE_PREFIX = {
+    "AXButton": "B",
+    "AXTextField": "T",
+    "AXTextArea": "T",
+    "AXCheckBox": "C",
+    "AXRadioButton": "R",
+    "AXPopUpButton": "P",
+    "AXLink": "L",
+    "AXComboBox": "P",
+    "AXMenuItem": "M",
+    "AXStaticText": "S",
+}
+_ACTIONABLE_ROLES = set(_ROLE_PREFIX.keys())
+
+
+def fetch_ui_elements(app_name: str) -> list[dict]:
+    """Fetch actionable UI elements of the frontmost window via AppleScript."""
+    script = f'''
+tell application "System Events"
+    tell process "{app_name}"
+        set output to ""
+        try
+            set elems to entire contents of window 1
+            repeat with e in elems
+                try
+                    set r to role of e
+                    if r is in {{"AXButton", "AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXLink", "AXComboBox", "AXStaticText"}} then
+                        set t to ""
+                        try
+                            set t to name of e
+                        end try
+                        if t is "" or t is missing value then
+                            try
+                                set t to value of e as string
+                            end try
+                        end if
+                        if t is missing value then set t to ""
+                        set p to position of e
+                        set s to size of e
+                        if (item 1 of s) > 4 and (item 2 of s) > 4 then
+                            set output to output & r & "|" & t & "|" & (item 1 of p) & "," & (item 2 of p) & "|" & (item 1 of s) & "," & (item 2 of s) & "\n"
+                        end if
+                    end if
+                end try
+            end repeat
+        end try
+        return output
+    end tell
+end tell
+'''
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True, text=True, timeout=15,
+    )
+    raw = result.stdout.strip()
+    elements = []
+    counters: dict[str, int] = {}
+    for line in raw.splitlines():
+        parts = line.split("|")
+        if len(parts) != 4:
+            continue
+        role, label, pos_str, size_str = parts
+        try:
+            px, py = [int(v) for v in pos_str.split(",")]
+            pw, ph = [int(v) for v in size_str.split(",")]
+        except ValueError:
+            continue
+        prefix = _ROLE_PREFIX.get(role, "E")
+        counters[prefix] = counters.get(prefix, 0) + 1
+        elem_id = f"{prefix}{counters[prefix]}"
+        elements.append({"id": elem_id, "role": role, "label": label.strip(), "x": px, "y": py, "w": pw, "h": ph})
+    return elements
+
+
+def annotate_screenshot(elements: list[dict], app_name: str | None = None):
+    """Take screenshot, draw element ID labels, return (PIL Image, cropped bounds or None)."""
+    img = pyautogui.screenshot()
+    draw = ImageDraw.Draw(img)
+
+    bounds = get_window_bounds(app_name) if app_name else None
+
+    colors = {"B": "#FF3B30", "T": "#007AFF", "C": "#34C759", "R": "#34C759",
+              "P": "#FF9500", "L": "#5856D6", "M": "#FF2D55", "S": "#8E8E93", "E": "#636366"}
+
+    for elem in elements:
+        eid = elem["id"]
+        color = colors.get(eid[0], "#636366")
+        x, y, w, h = elem["x"], elem["y"], elem["w"], elem["h"]
+        draw.rectangle([x, y, x + w, y + h], outline=color, width=2)
+        # ラベル背景
+        lx, ly = x, max(0, y - 16)
+        label_text = eid
+        draw.rectangle([lx, ly, lx + len(label_text) * 8 + 4, ly + 14], fill=color)
+        draw.text((lx + 2, ly + 1), label_text, fill="white")
+
+    if bounds:
+        wx, wy, ww, wh = bounds
+        img = img.crop((wx, wy, wx + ww, wy + wh))
+
+    return img
+
+
 def screenshot_result(message: str, delay: float = 0.5, app_name: str | None = None) -> list:
     """Return text message + screenshot as MCP content list.
 
@@ -82,6 +188,55 @@ def screenshot_result(message: str, delay: float = 0.5, app_name: str | None = N
         TextContent(type="text", text=message),
         ImageContent(type="image", data=b64, mimeType="image/png"),
     ]
+
+
+# ──────────────────────────────────────────
+# 要素ベース操作 (Peekaboo方式)
+# ──────────────────────────────────────────
+
+@mcp.tool()
+def see(app_name: str) -> list:
+    """Capture the app window and return an annotated screenshot with element IDs.
+
+    Each actionable UI element is labeled with a short ID:
+      B = Button, T = TextField/TextArea, C = CheckBox, R = RadioButton,
+      P = PopUp/ComboBox, L = Link, S = StaticText
+
+    Use the returned IDs with click_element to interact without coordinates.
+    """
+    global _element_cache
+    elements = fetch_ui_elements(app_name)
+    _element_cache = {e["id"]: (e["x"], e["y"], e["w"], e["h"]) for e in elements}
+
+    img = annotate_screenshot(elements, app_name)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+
+    lines = [f"{e['id']:4s}  {e['role']:20s}  {e['label'][:40]}" for e in elements]
+    summary = f"Found {len(elements)} elements:\n" + "\n".join(lines)
+
+    return [
+        TextContent(type="text", text=summary),
+        ImageContent(type="image", data=b64, mimeType="image/png"),
+    ]
+
+
+@mcp.tool()
+def click_element(element_id: str, app_name: str = "") -> list:
+    """Click a UI element by its ID from the last `see` call (e.g. 'B1', 'T2').
+
+    Args:
+        element_id: Element ID returned by `see` (e.g. 'B1', 'T2', 'L3').
+        app_name: If provided, crops the result screenshot to this app's window.
+    """
+    bounds = _element_cache.get(element_id.upper())
+    if bounds is None:
+        return screenshot_result(f"Element '{element_id}' not found. Run `see` first.", delay=0)
+    x, y, w, h = bounds
+    cx, cy = x + w // 2, y + h // 2
+    pyautogui.click(cx, cy)
+    return screenshot_result(f"Clicked element {element_id} at ({cx}, {cy})", delay=0.3, app_name=app_name or None)
 
 
 # ──────────────────────────────────────────
