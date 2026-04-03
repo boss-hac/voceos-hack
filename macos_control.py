@@ -14,6 +14,15 @@ pyautogui.PAUSE = 0.1
 mcp = FastMCP("macos-control")
 
 
+VIRTUAL_SIZE = 1000
+
+
+def to_screen(x: int, y: int) -> tuple[int, int]:
+    """Convert virtual 1000x1000 coordinates to actual screen coordinates."""
+    sw, sh = pyautogui.size()
+    return int(x * sw / VIRTUAL_SIZE), int(y * sh / VIRTUAL_SIZE)
+
+
 def osascript(script: str) -> str:
     result = subprocess.run(
         ["osascript", "-e", script],
@@ -213,56 +222,63 @@ def get_clipboard() -> list:
 
 @mcp.tool()
 def get_mouse_position() -> list:
-    """Get the current mouse cursor position (x, y)."""
-    x, y = pyautogui.position()
-    return screenshot_result(f"x={x}, y={y}", delay=0)
+    """Get the current mouse cursor position as virtual 1000x1000 coordinates."""
+    ax, ay = pyautogui.position()
+    sw, sh = pyautogui.size()
+    vx = int(ax * VIRTUAL_SIZE / sw)
+    vy = int(ay * VIRTUAL_SIZE / sh)
+    return screenshot_result(f"virtual=({vx}, {vy})  actual=({ax}, {ay})", delay=0)
 
 
 @mcp.tool()
 def mouse_move(x: int, y: int, duration: float = 0.3) -> list:
-    """Move the mouse cursor to (x, y).
+    """Move the mouse cursor to (x, y) in virtual 1000x1000 coordinates.
 
     Args:
-        x: Horizontal position in pixels.
-        y: Vertical position in pixels.
+        x: Horizontal position (0-1000).
+        y: Vertical position (0-1000).
         duration: Time in seconds for the movement (default 0.3).
     """
-    pyautogui.moveTo(x, y, duration=duration)
-    return screenshot_result(f"Moved to ({x}, {y})", delay=0.2)
+    sx, sy = to_screen(x, y)
+    pyautogui.moveTo(sx, sy, duration=duration)
+    return screenshot_result(f"Moved to virtual=({x}, {y})", delay=0.2)
 
 
 @mcp.tool()
 def mouse_click(x: int, y: int, button: str = "left") -> list:
-    """Click at the given position.
+    """Click at the given position in virtual 1000x1000 coordinates.
 
     Args:
-        x: Horizontal position in pixels.
-        y: Vertical position in pixels.
+        x: Horizontal position (0-1000).
+        y: Vertical position (0-1000).
         button: 'left', 'right', or 'double' (default 'left').
     """
+    sx, sy = to_screen(x, y)
     if button == "double":
-        pyautogui.doubleClick(x, y)
+        pyautogui.doubleClick(sx, sy)
     elif button == "right":
-        pyautogui.rightClick(x, y)
+        pyautogui.rightClick(sx, sy)
     else:
-        pyautogui.click(x, y)
-    return screenshot_result(f"{button} click at ({x}, {y})", delay=0.3)
+        pyautogui.click(sx, sy)
+    return screenshot_result(f"{button} click at virtual=({x}, {y})", delay=0.3)
 
 
 @mcp.tool()
 def mouse_drag(from_x: int, from_y: int, to_x: int, to_y: int, duration: float = 0.5) -> list:
-    """Drag from one position to another.
+    """Drag from one position to another in virtual 1000x1000 coordinates.
 
     Args:
-        from_x: Start horizontal position.
-        from_y: Start vertical position.
-        to_x: End horizontal position.
-        to_y: End vertical position.
+        from_x: Start horizontal position (0-1000).
+        from_y: Start vertical position (0-1000).
+        to_x: End horizontal position (0-1000).
+        to_y: End vertical position (0-1000).
         duration: Time in seconds for the drag (default 0.5).
     """
-    pyautogui.moveTo(from_x, from_y, duration=0.2)
-    pyautogui.dragTo(to_x, to_y, duration=duration, button="left")
-    return screenshot_result(f"Dragged from ({from_x}, {from_y}) to ({to_x}, {to_y})", delay=0.3)
+    sfx, sfy = to_screen(from_x, from_y)
+    stx, sty = to_screen(to_x, to_y)
+    pyautogui.moveTo(sfx, sfy, duration=0.2)
+    pyautogui.dragTo(stx, sty, duration=duration, button="left")
+    return screenshot_result(f"Dragged from virtual=({from_x}, {from_y}) to ({to_x}, {to_y})", delay=0.3)
 
 
 @mcp.tool()
@@ -275,7 +291,8 @@ def mouse_scroll(amount: int, x: int = None, y: int = None) -> list:
         y: Optional vertical position to scroll at.
     """
     if x is not None and y is not None:
-        pyautogui.moveTo(x, y, duration=0.2)
+        sx, sy = to_screen(x, y)
+        pyautogui.moveTo(sx, sy, duration=0.2)
     pyautogui.scroll(amount)
     direction = "up" if amount > 0 else "down"
     return screenshot_result(f"Scrolled {direction} by {abs(amount)}", delay=0.3)
