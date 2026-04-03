@@ -1,0 +1,6 @@
+[project]
+name = "nakura"
+version = "0.1.0"
+description = "寝る前のひらめきを翌朝の自分に届けるVoiceOS用MCPサーバー"
+requires-python = ">=3.11"
+dependencies = ["mcp>=1.0.0"]
